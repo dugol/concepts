@@ -1,0 +1,23 @@
+kafka:
+  enabled: true
+  clusterProperties:
+    bootstrap: ${CLUSTER_SERVER}
+    schemaRegistry: ${SCHEMA_REGISTRY_SERVER}
+    name: ${CLUSTER_NAME}
+    username: ${CLUSTER_USERNAME}
+    password: ${CLUSTER_PASSWORD}
+  topic-groups:
+    some-consumer-group:
+      consumer-config:
+        group-id: ${APP_ID}
+        auto-offset-reset: ${autoOffsetReset}
+        failure-back-off-max-time: 60000
+        concurrency: 1
+      avro-config:
+        key-subject-name-strategy: io.confluent.kafka.serializers.subject.TopicNameStrategy
+        value-subject-name-strategy: io.confluent.kafka.serializers.subject.TopicNameStrategy
+      topics:
+      topic-1:
+        name: topic-1-name
+      topic-2:
+        name: topic-2-name
