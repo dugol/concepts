@@ -1,0 +1,216 @@
+version: '3'
+
+services:
+  config-service:
+    image: config-service:1.0
+    ports:
+      - '9000:9000'
+    container_name: config-service
+    volumes:
+      - "./config-server/build/libs/config-server-0.0.1-SNAPSHOT.jar:/app.jar"
+    networks:
+      - backend
+    healthcheck:
+      test: "curl --fail --silent localhost:9000/actuator/health | grep UP || exit 1" # Command to check health.
+      interval: 30s # Interval between health checks.
+      timeout: 10s # Timeout for each health checking.
+      retries: 5 # Hou many times retries.
+      #start_period: 10s # Estimated time to
+
+  discovery-service:
+    image: discovery-service:1.0
+    container_name: discovery-service
+    ports:
+      - '8761:8761'
+    volumes:
+      - "./discovery-service/build/libs/discovery-service-0.0.1-SNAPSHOT.jar:/app.jar"
+    networks:
+      - backend
+    healthcheck:
+      test: "curl --fail http://localhost:8761 || exit 1" # Command to check health.
+      interval: 30s # Interval between health checks.
+      timeout: 10s # Timeout for each health checking.
+      retries: 5 # Hou many times retries.
+
+  rabbitmq:
+    image: rabbitmq:3.9-management
+    container_name: rabbitmq
+    ports:
+      - '15672:15672'
+      - '5672:5672'
+    networks:
+      - backend
+    healthcheck:
+      test: "rabbitmq-diagnostics -q ping" # Command to check health.
+      interval: 30s # Interval between health checks.
+      timeout: 10s # Timeout for each health checking.
+      retries: 5 # Hou many times retries.
+
+  api-gateway:
+    image: api-gateway:1.0
+    container_name: api-gateway
+    ports:
+      - '8080:8080'
+    environment:
+      - EUREKA_CLIENT_SERVICE-URL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - SERVER_PORT=8080
+    volumes:
+      - "./api-geteway/build/libs/api-geteway-0.0.1-SNAPSHOT.jar:/app.jar"
+    networks:
+      - backend
+    depends_on:   
+      discovery-service:
+        condition: service_healthy
+
+  mongo:
+    image: mongo
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./microservices/product-microservice/data:/data/db
+    networks:
+      - backend
+    healthcheck:
+      test: "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/productdb --quiet" # Command to check health.
+      interval: 30s # Interval between health checks.
+      timeout: 10s # Timeout for each health checking.
+      retries: 5 # Hou many times retries.
+
+  product-service:
+    #build: ./microservices/product-microservice
+    image: product-service:1.0
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=http://config-service:9000
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/productdb
+      - eureka_client_service-url_defaultZone=http://discovery-service:8761/eureka/
+      - SERVER_PORT=8082    
+    # ports:
+    #   - "8082:8082"
+    volumes:
+      - "./microservices/product-microservice/build/libs/product-microservice-0.0.1-SNAPSHOT.jar:/app.jar"
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      config-service:
+        condition: service_healthy
+    networks:
+      - backend
+
+  postgres-stock:
+    image: postgres
+    container_name: postgres-stock
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: stockdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./microservices/stock-microservice/data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: "pg_isready -U postgres -d stockdb" # Command to check health.
+      interval: 30s # Interval between health checks.
+      timeout: 10s # Timeout for each health checking.
+      retries: 5 # Hou many times retries.
+
+  stock-service:
+    image: stock-service:1.0
+    environment:
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_DATASOURCE_URI=jdbc:postgresql://postgres-stock:5432/stockdb
+      - SPRING_CLOUD_CONFIG_URI=http://config-service:9000
+      - eureka_client_service-url_defaultZone=http://discovery-service:8761/eureka/ 
+    volumes:
+      - "./microservices/stock-microservice/build/libs/stock-microservice-0.0.1-SNAPSHOT.jar:/app.jar"
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      postgres-stock:
+        condition: service_healthy
+      config-service:
+        condition: service_healthy
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+  # postgres-booking:
+  #   image: postgres
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_DB: bookingdb
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - ./microservices/booking-microservice/data:/var/lib/postgresql/data
+  #   networks:
+  #     - backend
+  #   healthcheck:
+  #     test: "pg_isready -U postgres -d bookingdb" # Command to check health.
+  #     interval: 30s # Interval between health checks.
+  #     timeout: 10s # Timeout for each health checking.
+  #     retries: 5 # Hou many times retries.
+
+  # booking-service:
+  #   image: booking-service:1.0
+  #   environment:
+  #     - SPRING_CLOUD_CONFIG_URI=http://config-service:9000
+  #     - SPRING_RABBITMQ_HOST=rabbitmq
+  #     - SPRING_DATASOURCE_URI=jdbc:postgresql://postgres:5432/bookingdb
+  #     - eureka_client_service-url_defaultZone=http://discovery-service:8761/eureka/ 
+  #   volumes:
+  #     - "./microservices/booking-microservice/build/libs/booking-microservice-0.0.1-SNAPSHOT.jar:/app.jar"
+  #   depends_on:
+  #     discovery-service:
+  #       condition: service_healthy
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     postgres-booking:
+  #       condition: service_healthy
+  #     config-service:
+  #       condition: service_healthy
+  #   networks:
+  #     - backend
+  
+  # mongo-express:
+  #   image: mongo-express
+  #   container_name: mongo-express
+  #   ports:
+  #     - 8081:8081
+  #   environment:
+  #     ME_CONFIG_MONGODB_SERVER: mongodb
+  #     ME_CONFIG_BASICAUTH_USERNAME: root
+  #     ME_CONFIG_BASICAUTH_PASSWORD: root
+  #     ME_CONFIG_MONGODB_ADMINUSERNAME: root
+  #     ME_CONFIG_MONGODB_ADMINPASSWORD: root
+  #     ME_CONFIG_MONGODB_PORT: 27017
+  #     ME_CONFIG_MONGODB_ENABLE_ADMIN: true
+  #   networks:
+  #     - backend
+  #   depends_on:
+  #     - mongo
+  
+  # keycloak:
+  #   image: quay.io/keycloak/keycloak:20.0.3
+  #   container_name: keycloak
+  #   ports:
+  #     - 9090:8080
+  #   environment:
+  #     KEYCLOAK_ADMIN: admin 
+  #     KEYCLOAK_ADMIN_PASSWORD: admin
+
